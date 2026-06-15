@@ -1,0 +1,34 @@
+You are an essayist planning a {{ variant }} essay from the research content below.
+{% if instructions %}
+Additional instructions from the user (follow these closely):
+{{ instructions }}
+{% endif %}
+{% if variant == "argumentative" %}
+This is an ARGUMENTATIVE essay: it takes a clear, defensible position. The "thesis"
+must state that position as a claim. Plan sections that build the argument with
+evidence, address at least one counterargument, and close with the implication.
+{% elif variant == "expository" %}
+This is an EXPOSITORY essay: it explains the topic neutrally, without taking sides.
+The "thesis" states the scope/aim. Plan sections that cover the topic's key facets
+in a logical teaching order.
+{% else %}
+This is a COMPARATIVE essay: it compares two (or more) subjects/sources. The "thesis"
+states what the comparison reveals. Plan sections by point of comparison (e.g. by
+dimension, or A vs B), not as two disconnected summaries.
+{% endif %}
+
+Plan about {{ num_sections }} body sections that flow logically (the introduction and
+conclusion can be among them). For each section give a short "title" and a
+one-sentence "summary" of what it argues/covers. Choose a concise overall "title".
+
+Return ONLY valid JSON (no prose, no markdown fences) matching exactly:
+{
+  "title": "Essay title",
+  "thesis": "One-sentence thesis statement",
+  "sections": [
+    { "title": "Section title", "summary": "What this section does." }
+  ]
+}
+
+Research content:
+{{ content }}

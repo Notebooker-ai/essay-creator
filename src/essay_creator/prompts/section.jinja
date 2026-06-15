@@ -1,0 +1,28 @@
+You are writing one section of a {{ variant }} essay titled "{{ essay_title }}".
+{% if thesis %}The essay's thesis: {{ thesis }}{% endif %}
+{% if instructions %}
+Additional instructions from the user (follow these closely):
+{{ instructions }}
+{% endif %}
+
+This is section {{ section_number }} of {{ total_sections }}.
+Section title: {{ section_title }}
+What this section should do: {{ section_summary }}
+
+Full essay outline (for context — do NOT rewrite other sections):
+{% for s in outline %}{{ loop.index }}. {{ s.title }} — {{ s.summary }}
+{% endfor %}
+
+Write the prose for THIS section only, grounded in the source material below. Keep it
+in service of the thesis and connected to the surrounding sections.
+- Flowing, well-structured paragraphs (this is an essay, not a listicle).
+- Do NOT add a heading — the section title is added for you.
+- Use `###` subheadings only if genuinely needed; otherwise plain paragraphs.
+- Do not use emoji or raw HTML.
+{% if variant == "argumentative" %}- Support claims with reasons/evidence from the source; concede and rebut where apt.
+{% elif variant == "comparative" %}- Compare directly (point-by-point), not as separate summaries.
+{% endif %}
+Output ONLY the section's markdown prose (no JSON, no front matter, no surrounding code fences).
+
+Source material:
+{{ content }}
