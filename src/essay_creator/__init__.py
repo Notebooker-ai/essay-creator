@@ -136,6 +136,10 @@ class EssayCreator(BaseCreator):
                 )
             ],
             icon="pen-line",
+            suggestion_hint=(
+                "the thesis to argue and which evidence, tensions, or contrasts to "
+                "build the argument on"
+            ),
         )
 
     async def generate(self, request: CreationRequest) -> CreationResult:
