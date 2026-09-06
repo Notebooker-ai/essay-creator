@@ -6,7 +6,7 @@ description = "Open Notebook creator: LLM-written essays rendered to HTML/PDF vi
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "open-notebook-creator-sdk>=0.10",
+    "open-notebook-creator-sdk>=0.12",
     "esperanto>=2.19",
     "ai-prompter>=0.3.1",
     "langchain-core>=0.3",
@@ -31,7 +31,7 @@ build-backend = "hatchling.build"
 packages = ["src/essay_creator"]
 
 [tool.uv.sources]
-open-notebook-creator-sdk = { git = "https://github.com/Notebooker-ai/open-notebook-creator-sdk.git", rev = "1a5cf1ecc3d9571ed2f317fe35eddd2e799539db" }
+open-notebook-creator-sdk = { git = "https://github.com/Notebooker-ai/open-notebook-creator-sdk.git", rev = "59d39d7429fd603915ae25a8ef876361518b8d77" }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
