@@ -1,6 +1,6 @@
 [project]
 name = "essay-creator"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Open Notebook creator: LLM-written essays rendered to HTML/PDF via Quarto (essay.v1)"
 readme = "README.md"

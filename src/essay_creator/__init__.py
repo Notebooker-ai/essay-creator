@@ -6,6 +6,9 @@ The LLM first plans a thesis + section outline (tuned to the chosen variant —
 argumentative / expository / comparative), then writes one section at a time. The
 sections are assembled into a single ``.qmd`` and handed to the ``quarto`` CLI. PDF
 uses the ``tectonic`` engine so no full TeX Live install is needed.
+
+The assembled ``.qmd`` is attached to the result as a ``source`` file so the host
+can let users edit it and re-render (``render``) without another LLM pass.
 """
 
 from __future__ import annotations
@@ -27,13 +30,14 @@ from open_notebook_creator_sdk import (
     CreationResult,
     CreatorManifest,
     ModelRoleSpec,
+    RenderRequest,
 )
 from open_notebook_creator_sdk.schemas import EssayV1
 from pydantic import BaseModel, Field
 
 from .sanitize import sanitize_markdown
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 _QMD_NAME = "essay.qmd"
 _QMD_STEM = "essay"
@@ -115,6 +119,57 @@ async def _quarto_render(output_dir: Path, fmt: str) -> None:
         raise RuntimeError(detail[-2000:] or f"quarto exited {proc.returncode}")
 
 
+async def _render_formats(
+    output_dir: Path, formats: list[str]
+) -> tuple[list[CreationFile], list[str], list[CreationError], list[str]]:
+    """Render ``essay.qmd`` (already in ``output_dir``) to each requested format.
+
+    Best-effort: one format failing is non-fatal; a missing ``quarto`` binary
+    aborts the loop. Returns ``(files, warnings, errors, rendered_formats)`` with
+    the HTML output (the inline-viewable file) sorted first.
+    """
+    files: list[CreationFile] = []
+    warnings: list[str] = []
+    errors: list[CreationError] = []
+    rendered: list[str] = []
+    for fmt in formats:
+        ext, content_type, label = _FORMAT_META[fmt]
+        out_name = f"{_QMD_STEM}.{ext}"
+        try:
+            await _quarto_render(output_dir, fmt)
+            if not (output_dir / out_name).exists():
+                raise RuntimeError("quarto reported success but produced no output file")
+            files.append(
+                CreationFile(filename=out_name, content_type=content_type, path=out_name, label=label)
+            )
+            rendered.append(fmt)
+        except FileNotFoundError:
+            logger.error("essay: 'quarto' binary not found on PATH")
+            errors.append(CreationError(phase="render", message="quarto not installed"))
+            warnings.append("Quarto is not installed on the server; cannot render the essay.")
+            break
+        except Exception as e:  # noqa: BLE001 - one format failing is non-fatal
+            logger.warning(f"essay: {fmt} render failed: {e}")
+            warnings.append(f"{label} export failed.")
+            errors.append(CreationError(phase="render", message=f"{fmt}: {e}"))
+
+    # HTML (the inline-viewable file) first, then the rest.
+    files.sort(key=lambda f: 0 if f.content_type == "text/html" else 1)
+    return files, warnings, errors, rendered
+
+
+def _source_file() -> CreationFile:
+    """The ``.qmd`` as a ``role="source"`` file: the host shows it in its source
+    editor and hands the edited text back through :meth:`EssayCreator.render`."""
+    return CreationFile(
+        filename=_QMD_NAME,
+        content_type="text/markdown",
+        path=_QMD_NAME,
+        role="source",
+        label="Source",
+    )
+
+
 class EssayCreator(BaseCreator):
     config_model: ClassVar[type] = EssayConfig
 
@@ -136,6 +191,7 @@ class EssayCreator(BaseCreator):
                 )
             ],
             icon="pen-line",
+            editable_source=True,
             suggestion_hint=(
                 "the thesis to argue and which evidence, tensions, or contrasts to "
                 "build the argument on"
@@ -230,31 +286,7 @@ class EssayCreator(BaseCreator):
         (output_dir / _QMD_NAME).write_text("\n".join(parts), encoding="utf-8")
 
         # 4. Render each requested format (best-effort: one failure -> PARTIAL).
-        files: list[CreationFile] = []
-        warnings: list[str] = []
-        errors: list[CreationError] = []
-        rendered: list[str] = []
-        for fmt in cfg.formats:
-            ext, content_type, label = _FORMAT_META[fmt]
-            out_name = f"{_QMD_STEM}.{ext}"
-            try:
-                await _quarto_render(output_dir, fmt)
-                if not (output_dir / out_name).exists():
-                    raise RuntimeError("quarto reported success but produced no output file")
-                files.append(
-                    CreationFile(filename=out_name, content_type=content_type, path=out_name, label=label)
-                )
-                rendered.append(fmt)
-            except FileNotFoundError:
-                logger.error("essay: 'quarto' binary not found on PATH")
-                errors.append(CreationError(phase="render", message="quarto not installed"))
-                warnings.append("Quarto is not installed on the server; cannot render the essay.")
-                break
-            except Exception as e:  # noqa: BLE001 - one format failing is non-fatal
-                logger.warning(f"essay: {fmt} render failed: {e}")
-                warnings.append(f"{label} export failed.")
-                errors.append(CreationError(phase="render", message=f"{fmt}: {e}"))
-
+        files, warnings, errors, rendered = await _render_formats(output_dir, cfg.formats)
         if not rendered:
             return CreationResult(
                 status="FAILURE",
@@ -265,7 +297,8 @@ class EssayCreator(BaseCreator):
                 user_message="The essay could not be rendered to any format.",
             )
 
-        files.sort(key=lambda f: 0 if f.content_type == "text/html" else 1)
+        # Outputs first (HTML leading), then the editable source for the host's editor.
+        files.append(_source_file())
 
         data = EssayV1(
             title=title,
@@ -274,6 +307,62 @@ class EssayCreator(BaseCreator):
             formats=rendered,
         ).model_dump()
 
+        return CreationResult(
+            status="PARTIAL" if errors else "SUCCESS",
+            schema_id="essay.v1",
+            data=data,
+            files=files,
+            warnings=warnings,
+            errors=errors,
+        )
+
+    async def render(self, request: RenderRequest) -> CreationResult:
+        """Re-render the (possibly user-edited) ``essay.qmd``. Deterministic: no LLM."""
+        cfg = EssayConfig.model_validate(request.config)
+        output_dir = Path(request.output_dir)
+
+        # The host already restored every source/asset into output_dir; write the
+        # sources again anyway so render() is self-contained given only the request.
+        for doc in request.sources:
+            target = output_dir / doc.filename
+            if not target.resolve().is_relative_to(output_dir.resolve()):
+                return CreationResult(
+                    status="FAILURE",
+                    schema_id="essay.v1",
+                    data=request.data,
+                    errors=[
+                        CreationError(
+                            phase="render", message=f"source path escapes output_dir: {doc.filename}"
+                        )
+                    ],
+                    user_message="The essay source could not be written.",
+                )
+            target.write_text(doc.content, encoding="utf-8")
+        if not any(doc.filename == _QMD_NAME for doc in request.sources):
+            return CreationResult(
+                status="FAILURE",
+                schema_id="essay.v1",
+                data=request.data,
+                errors=[CreationError(phase="render", message=f"missing source file {_QMD_NAME}")],
+                user_message="The essay source is missing; nothing to render.",
+            )
+
+        files, warnings, errors, rendered = await _render_formats(output_dir, cfg.formats)
+        if not rendered:
+            return CreationResult(
+                status="FAILURE",
+                schema_id="essay.v1",
+                data=request.data,
+                warnings=warnings,
+                errors=errors or [CreationError(phase="render", message="no formats rendered")],
+                user_message="The essay could not be rendered to any format.",
+            )
+
+        # Carry forward what the source does not encode (title, thesis, variant) and
+        # replace what this render decided. Validating against the schema makes a
+        # stale/garbage previous ``data`` fail loudly instead of being persisted.
+        data = EssayV1.model_validate({**request.data, "formats": rendered}).model_dump()
+        files.append(_source_file())
         return CreationResult(
             status="PARTIAL" if errors else "SUCCESS",
             schema_id="essay.v1",
